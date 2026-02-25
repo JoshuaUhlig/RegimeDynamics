@@ -1,6 +1,6 @@
 ## Data Analysis
 
-1. Create a folder called `all_trajectories/` and a folder called `figures/´
+1. Create a folder called `all_trajectories/` and a folder called `figures/`
 2. Run `create_figs.py`
 
 ## Simulation of CTRW
