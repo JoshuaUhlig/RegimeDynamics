@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
+from matplotlib.lines import Line2D
 import os
 import sys
 
@@ -33,7 +35,11 @@ def tamsd_data(arr):
 
 
 def create_tamsd_plot():
-    fig, axes = plt.subplots(1, 2, figsize=set_size(subplots=(1, 2), ratio=3 / 4))
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=figure_size(subplots=(1, 2), ratio=3 / 4),
+    )
     ax, ax_scatter = axes
     ax.tick_params(top=True, right=True, direction="in", which="both")
     ax.set_xscale("log")
@@ -95,7 +101,15 @@ def create_tamsd_plot():
         color=False,
     )
     fig.tight_layout()
-    ax.legend(frameon=False, bbox_to_anchor=(2, -0.5), ncols=2)
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        frameon=False,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.2),
+        ncols=2,
+    )
     plt.savefig("figures/tamsd_data_ctrw.pdf", bbox_inches="tight")
     plt.close()
 
@@ -214,7 +228,9 @@ def startyear_xi_scatter(startyear, min_length, fig, ax, sim_path, data, color):
 
 
 def create_tamsd_comparison_plot():
-    fig, axes = plt.subplots(1, 2, figsize=set_size(subplots=(1, 2), ratio=3 / 4))
+    fig, axes = plt.subplots(
+        1, 2, figsize=figure_size("aps_single", subplots=(1, 2), ratio=3 / 4)
+    )
     startyear = 1990
     min_length = 30
     ax, ax_scatter = axes
@@ -255,7 +271,7 @@ def create_tamsd_comparison_plot():
     path = "all_trajectories/"
     startyear = 1990
     min_length = 30
-    TAMSD = np.zeros((min_length))
+    TAMSD = np.zeros(min_length)
     counter = 0
     nr_trajectories = 0
     for filename in os.listdir(path):
@@ -280,12 +296,113 @@ def create_tamsd_comparison_plot():
         color="black",
         label=r"V-Dem Data",
     )
-    # startyear_xi_scatter(startyear=startyear,min_length=min_length,fig=fig,ax=ax_scatter)
+    fig.legend(frameon=False, loc="outside lower center", ncols=4)
     fig.tight_layout()
-    ax.legend(frameon=False, bbox_to_anchor=(2.7, -0.5), ncols=4)
     plt.savefig("figures/tamsd_data_ctrw_cutoffs.pdf", bbox_inches="tight")
     plt.close()
 
 
+def plot_increment_autocorrelation(
+    startyear=1990,
+    min_length=30,
+    sim_path="sim_trajectories/",
+    data_path="all_trajectories/",
+):
+    """
+    Increment autocorrelation C(tau) = <v(t) v(t+tau)> / <v(t)^2>,
+    where v(t) = r(t+1) - r(t) are the annual increments.
+    Computed per trajectory then ensemble-averaged.
+    """
+    max_lag = min_length // 2
+    lags = np.arange(0, max_lag + 1)
+
+    def traj_autocorr(v):
+        """Normalised time-averaged autocorrelation for a single increment series."""
+        c0 = np.mean(v**2)
+        if c0 == 0:
+            return None
+        return np.array([np.mean(v[: len(v) - lag] * v[lag:]) / c0 for lag in lags])
+
+    # collect per-trajectory autocorrelations
+    data_ac1, data_ac2 = [], []
+    for filename in os.listdir(data_path):
+        filepath = data_path + filename
+        if not os.path.isfile(filepath):
+            continue
+        traj = np.loadtxt(filepath)
+        if traj[0, 0] > startyear or traj[-1, 0] <= startyear:
+            continue
+        startindex = np.where(traj[:, 0] == startyear)[0][0]
+        if traj[startindex:].shape[0] < min_length:
+            continue
+        traj = traj[startindex : startindex + min_length + 1, :]
+        ac1 = traj_autocorr(np.diff(traj[:, 1]))
+        ac2 = traj_autocorr(np.diff(traj[:, 2]))
+        if ac1 is not None:
+            data_ac1.append(ac1)
+        if ac2 is not None:
+            data_ac2.append(ac2)
+
+    sim_ac1, sim_ac2 = [], []
+    for filename in os.listdir(sim_path):
+        filepath = sim_path + filename
+        if not os.path.isfile(filepath):
+            continue
+        traj = np.loadtxt(filepath)
+        ac1 = traj_autocorr(np.diff(traj[:, 0]))
+        ac2 = traj_autocorr(np.diff(traj[:, 1]))
+        if ac1 is not None:
+            sim_ac1.append(ac1)
+        if ac2 is not None:
+            sim_ac2.append(ac2)
+
+    data_ac1, data_ac2 = np.array(data_ac1), np.array(data_ac2)
+    sim_ac1, sim_ac2 = np.array(sim_ac1), np.array(sim_ac2)
+
+    # plot
+    fig, (ax1, ax2) = plt.subplots(
+        1,
+        2,
+        figsize=set_size(ratio=3 / 4, subplots=(1, 2)),
+        sharey=True,
+    )
+
+    for ax, d_ac, s_ac, xlabel in [
+        (ax1, data_ac1, sim_ac1, r"${d\mathrm{PC}1}$"),
+        (ax2, data_ac2, sim_ac2, r"${d\mathrm{PC}2}$"),
+    ]:
+        d_mean = np.mean(d_ac, axis=0)
+        d_err = np.std(d_ac, axis=0) / np.sqrt(len(d_ac))
+        s_mean = np.mean(s_ac, axis=0)
+        s_err = np.std(s_ac, axis=0) / np.sqrt(len(s_ac))
+
+        ax.axhline(0, color="gray", lw=0.8, ls="--", zorder=0)
+        ax.errorbar(
+            lags, s_mean, yerr=s_err, fmt="s", color="black", label="CTRW Model"
+        )
+        ax.errorbar(
+            lags, d_mean, yerr=d_err, fmt="o", color=main_color, label="V-Dem Data"
+        )
+
+        ax.set_xlabel(r"Lag $\Delta$ (years)")
+        ax1.set_ylabel(r"$C_{\mathrm{PC}1}$" + r"$(\Delta)$")
+        ax2.set_ylabel(r"$C_{\mathrm{PC}2}$" + r"$(\Delta)$")
+        ax.tick_params(top=True, right=True, direction="in", which="both")
+
+    handles, labels = ax1.get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        frameon=False,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.6),
+        ncols=2,
+        fontsize=10,
+    )
+    plt.savefig("figures/increment_autocorrelation.pdf", bbox_inches="tight")
+    plt.close()
+
+
 create_tamsd_plot()
-# create_tamsd_comparison_plot()
+create_tamsd_comparison_plot()
+plot_increment_autocorrelation()
